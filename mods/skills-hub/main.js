@@ -27,6 +27,9 @@ export default class SkillsHub extends View {
     this.total = null;
     this.user = null;
     this.signing = false;
+    this.keyInput = InputState.new({ placeholder: "Paste your skills-hub API key, then Enter" });
+    this.keyInput.set_masked(true);
+    this.keyInput.on("submit", (_e, cx) => this.saveKey(cx));
     if (checking()) return;
     this.rescan(cx);
     this.load(cx);
@@ -51,29 +54,46 @@ export default class SkillsHub extends View {
     } catch { return null; }
   }
 
+  async refreshUser() {
+    const tok = await this.token();
+    let user = null;
+    if (tok) {
+      try {
+        const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `Bearer ${tok}` } });
+        if (r.ok) user = await r.json();
+      } catch {}
+    }
+    this.user = user;
+  }
+
   loadUser(cx) {
     cx.spawn(async (cx) => {
-      const tok = await this.token();
-      let user = null;
-      if (tok) {
-        try {
-          const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `Bearer ${tok}` } });
-          if (r.ok) user = await r.json();
-        } catch {}
-      }
-      this.user = user;
+      await this.refreshUser();
       cx.notify();
     });
   }
 
   signIn(cx) {
-    if (this.signing) return;
-    this.signing = true;
-    cx.notify();
     cx.spawn(async (cx) => {
-      const r = await exec("npx", ["-y", "@skills-hub-ai/cli", "login"], { timeout: 300_000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
+      await this.refreshUser();
+      if (this.user) {
+        notify({ title: "skills-hub", body: `You're already signed in as @${this.user.username}.`, timeout: 4000 });
+      } else {
+        this.signing = true;
+        this.open(L.siteUrl("/settings"));
+      }
+      cx.notify();
+    });
+  }
+
+  saveKey(cx) {
+    const key = this.keyInput.value().trim();
+    if (!key) return;
+    this.keyInput.set_value("");
+    cx.spawn(async (cx) => {
+      const r = await exec("npx", ["-y", "@skills-hub-ai/cli", "login", "--api-key", key], { timeout: 120_000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
+      if (r.code !== 0) notify({ title: "skills-hub", body: (r.stderr || r.stdout || "Couldn't save the key.").trim().split("\n").pop(), level: "error", timeout: 6000 });
       this.signing = false;
-      if (r.code !== 0) notify({ title: "skills-hub", body: (r.stderr || r.stdout || "Sign in didn't finish.").trim().split("\n").pop(), level: "error", timeout: 6000 });
       this.loadUser(cx);
     });
   }
@@ -297,7 +317,13 @@ export default class SkillsHub extends View {
       .when(Boolean(this.user), (el) => el.child(div().id("me").text_size(11.5).text_color(t.muted).cursor_pointer()
         .hover((s) => s.text_color(t.foreground)).tooltip("Signed in. Click to sign out.")
         .on_click((_e, cx) => this.signOut(cx)).child(`@${this.user.username}`)))
-      .when(!this.user, (el) => el.child(this.button("signin", this.signing ? "Finish in browser…" : "Sign in", t, { disabled: this.signing }, (cx) => this.signIn(cx))));
+      .when(!this.user, (el) => el.child(this.button("signin", this.signing ? "Cancel" : "Sign in", t, {}, (cx) => { if (this.signing) { this.signing = false; cx.notify(); } else this.signIn(cx); })));
+
+    const keyRow = v_flex().flex_none().mx(16).my(4).gap(4)
+      .child(div().text_size(11).text_color(t.muted).child("In Settings on skills-hub.ai, create an API key and paste it here."))
+      .child(div().id("key").h(30).px(10).flex().items_center().rounded(8).border_1().border_color(t.accent).cursor_text()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(Input.new(this.keyInput).h_full().text_size(12.5).text_color(t.foreground)));
 
     const search = div().id("search").flex_none().mx(16).my(4).h(30).px(10).flex().items_center().rounded(8)
       .border_1().border_color(this.typing ? t.accent : t.border).cursor_text()
@@ -342,6 +368,6 @@ export default class SkillsHub extends View {
         .on_click(() => this.open(L.siteUrl("/publish"))).child("Publish a skill ↗"));
 
     return v_flex().id("skills-hub").size_full().bg(t.surface).text_color(t.foreground)
-      .child(header).child(search).child(tabs).child(status).child(body).child(footer);
+      .child(header).when(this.signing && !this.user, (el) => el.child(keyRow)).child(search).child(tabs).child(status).child(body).child(footer);
   }
 }

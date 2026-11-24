@@ -20,7 +20,7 @@ A dialog 560×640 px (or a tab), on the theme's `surface`, ui font, top to botto
 ## How it behaves
 
 - Opens on Trending. Typing searches after 350 ms of quiet (Enter searches at once). Clicking a tab clears the search.
-- Clicking a card title opens `https://skills-hub.ai/skills/<slug>?utm_source=herdr&utm_medium=mod` in the system browser. Publish opens `/publish` with the same UTM. Sign in runs `npx -y @skills-hub-ai/cli login` (browser OAuth), then reads the token from `~/.skills-hub/config.json` and shows the user from `GET /users/me`.
+- Clicking a card title opens `https://skills-hub.ai/skills/<slug>?utm_source=herdr&utm_medium=mod` in the system browser. Publish opens `/publish` with the same UTM. Sign in checks `~/.skills-hub/config.json` against `GET /users/me`: if valid it says "You're already signed in"; otherwise it opens skills-hub.ai Settings and shows a masked field to paste an API key, saved with `npx -y @skills-hub-ai/cli login --api-key`.
 - Install fetches the skill, writes `SKILL.md` into `~/<tool>/skills/<slug>/` for every detected tool, posts one install count to skills-hub.ai, shows a toast naming the tools and rescans.
 - Sync copies each skill's newest copy (highest `version:` in frontmatter, ties go to Claude Code first) into each tool that lacks it or has an older version. It never deletes. A toast says how many copies were made.
 - A tool is detected when its config folder exists in the home folder: `.claude`, `.codex`, `.cursor`, `.gemini`, `.windsurf`, `.opencode`, `.cline`, `.roo`, `.augment`, `.continue`, `.junie`.
