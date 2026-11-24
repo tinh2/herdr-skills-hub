@@ -26,6 +26,11 @@ export default class SkillsHub extends View {
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.total = null;
     this.user = null;
+    this.orgs = [];
+    this.org = null;
+    this.manifest = null;
+    this.teamSyncing = false;
+    this.sharing = new Set();
     this.signing = false;
     this.keyInput = InputState.new({ placeholder: "Paste your skills-hub API key, then Enter" });
     this.keyInput.set_masked(true);
@@ -64,11 +69,92 @@ export default class SkillsHub extends View {
       } catch {}
     }
     this.user = user;
+    this.orgs = [];
+    if (user && tok) {
+      try {
+        const r = await fetch(`${L.API}/orgs`, { headers: { Authorization: `Bearer ${tok}` } });
+        if (r.ok) this.orgs = (await r.json()).map((m) => m.org).filter((o) => o?.slug);
+      } catch {}
+    }
+    if (!this.orgs.some((o) => o.slug === this.org)) this.org = this.orgs[0]?.slug ?? null;
+    if (!this.org && this.tab === "org") this.tab = "trending";
+  }
+
+  async headers(json) {
+    const tok = await this.token();
+    return { ...(tok ? { Authorization: `Bearer ${tok}` } : {}), ...(json ? { "content-type": "application/json" } : {}) };
+  }
+
+  orgName() {
+    return this.orgs.find((o) => o.slug === this.org)?.name ?? this.org;
+  }
+
+  loadManifest(cx) {
+    if (!this.org) return;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await fetch(L.manifestUrl(this.org), { headers: await this.headers() });
+        this.manifest = r.ok ? await r.json() : null;
+      } catch {
+        this.manifest = null;
+      }
+      cx.notify();
+    });
+  }
+
+  teamSync(cx) {
+    const plan = L.teamPlan(this.manifest, this.installed, this.scan.tools);
+    if (this.teamSyncing || !plan.length) return;
+    this.teamSyncing = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      let ok = 0;
+      const failed = [];
+      for (const m of plan) {
+        if (await this.installOne(m.slug)) ok++;
+        else failed.push(m.slug);
+      }
+      notify({
+        title: failed.length ? "Team sync finished with errors" : "Team skills synced",
+        body: failed.length ? `Couldn't install ${failed.join(", ")}` : `${ok} ${ok === 1 ? "skill" : "skills"} from ${this.orgName()} on every tool`,
+        level: failed.length ? "error" : "success",
+        timeout: 5000,
+      });
+      this.teamSyncing = false;
+      this.rescan(cx);
+    });
+  }
+
+  share(g, cx) {
+    if (!this.org || this.sharing.has(g.slug)) return;
+    this.sharing.add(g.slug);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const dir = L.toolById(Object.keys(g.tools)[0]).dir;
+        const file = await exec("cat", [`${home()}/${dir}/skills/${g.slug}/SKILL.md`], { on: this.machine });
+        if (file.code !== 0) throw new Error("Couldn't read its SKILL.md");
+        const body = L.publishBody(L.parseSkillMarkdown(file.stdout, g.slug), this.org, Object.keys(g.tools));
+        const r = await fetch(`${L.API}/skills`, { method: "POST", headers: await this.headers(true), body: JSON.stringify(body) });
+        if (!r.ok) {
+          const err = await r.json().catch(() => null);
+          throw new Error(err?.error?.message ?? `skills-hub.ai answered ${r.status}`);
+        }
+        notify({ title: `Shared ${body.name}`, body: `Your team in ${this.orgName()} can install it now.`, level: "success", timeout: 5000 });
+        this.loadManifest(cx);
+        delete this.results[`org:${this.org}`];
+      } catch (e) {
+        notify({ title: `Couldn't share ${g.slug}`, body: String(e?.message ?? e), level: "error", timeout: 7000 });
+      }
+      this.sharing.delete(g.slug);
+      cx.notify();
+    });
   }
 
   loadUser(cx) {
     cx.spawn(async (cx) => {
       await this.refreshUser();
+      this.loadManifest(cx);
       cx.notify();
     });
   }
@@ -125,19 +211,22 @@ export default class SkillsHub extends View {
   }
 
   key() {
+    if (this.tab === "org") return `org:${this.org}${this.query ? `:${this.query}` : ""}`;
     return this.query ? `q:${this.query}` : this.tab;
   }
 
   load(cx) {
     if (this.tab === "installed" && !this.query) return this.loadLatest(cx);
     const key = this.key();
-    const url = L.listUrl({ tab: this.tab, query: this.query });
+    const org = this.tab === "org";
+    const url = org ? L.orgSkillsUrl(this.org, this.query) : L.listUrl({ tab: this.tab, query: this.query });
     this.loading = true;
     this.error = "";
     cx.notify();
+    if (org) this.loadManifest(cx);
     cx.spawn(async (cx) => {
       try {
-        const r = await fetch(url);
+        const r = await fetch(url, org ? { headers: await this.headers() } : undefined);
         if (!r.ok) throw new Error(`skills-hub.ai answered ${r.status}`);
         const body = await r.json();
         this.results[key] = body.data ?? [];
@@ -156,7 +245,7 @@ export default class SkillsHub extends View {
       for (let i = 0; i < slugs.length; i += 6) {
         await Promise.all(slugs.slice(i, i + 6).map(async (slug) => {
           try {
-            const r = await fetch(`${L.API}/skills/${encodeURIComponent(slug)}`);
+            const r = await fetch(`${L.API}/skills/${encodeURIComponent(slug)}`, { headers: await this.headers() });
             this.latest[slug] = r.ok ? (await r.json()).latestVersion ?? null : null;
           } catch {
             this.latest[slug] = null;
@@ -178,6 +267,27 @@ export default class SkillsHub extends View {
     });
   }
 
+  async installOne(slug) {
+    const tools = this.scan.tools;
+    try {
+      const r = await fetch(`${L.API}/skills/${encodeURIComponent(slug)}`, { headers: await this.headers() });
+      if (!r.ok) throw new Error(`skills-hub.ai answered ${r.status}`);
+      const skill = await r.json();
+      const out = await exec("sh", ["-c", L.INSTALL_SCRIPT, "sh", ...L.installArgs(skill, tools)], { on: this.machine });
+      if (out.code !== 0) throw new Error(out.stderr.trim() || "install failed");
+      this.latest[slug] = skill.latestVersion;
+      fetch(`${L.API}/skills/${encodeURIComponent(slug)}/install`, {
+        method: "POST",
+        headers: await this.headers(true),
+        body: JSON.stringify({ version: skill.latestVersion, platform: L.toolById(tools[0]).platform }),
+      }).catch(() => {});
+      return skill;
+    } catch (e) {
+      this.lastError = String(e?.message ?? e);
+      return null;
+    }
+  }
+
   install(slug, cx) {
     if (this.busy.has(slug)) return;
     const tools = this.scan.tools;
@@ -188,23 +298,9 @@ export default class SkillsHub extends View {
     this.busy.add(slug);
     cx.notify();
     cx.spawn(async (cx) => {
-      try {
-        const r = await fetch(`${L.API}/skills/${encodeURIComponent(slug)}`);
-        if (!r.ok) throw new Error(`skills-hub.ai answered ${r.status}`);
-        const skill = await r.json();
-        const out = await exec("sh", ["-c", L.INSTALL_SCRIPT, "sh", ...L.installArgs(skill, tools)], { on: this.machine });
-        if (out.code !== 0) throw new Error(out.stderr.trim() || "install failed");
-        this.latest[slug] = skill.latestVersion;
-        fetch(`${L.API}/skills/${encodeURIComponent(slug)}/install`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ version: skill.latestVersion, platform: L.toolById(tools[0]).platform }),
-        }).catch(() => {});
-        const names = tools.map((t) => L.toolById(t).label).join(", ");
-        notify({ title: `Installed ${skill.name}`, body: `For ${names}`, level: "success", timeout: 4000 });
-      } catch (e) {
-        notify({ title: `Couldn't install ${slug}`, body: String(e?.message ?? e), level: "error", timeout: 6000 });
-      }
+      const skill = await this.installOne(slug);
+      if (skill) notify({ title: `Installed ${skill.name}`, body: `For ${tools.map((t) => L.toolById(t).label).join(", ")}`, level: "success", timeout: 4000 });
+      else notify({ title: `Couldn't install ${slug}`, body: this.lastError, level: "error", timeout: 6000 });
       this.busy.delete(slug);
       this.rescan(cx);
     });
@@ -299,6 +395,8 @@ export default class SkillsHub extends View {
       .child(div().id(`tools-${g.slug}`).flex_none().text_size(10.5).tooltip(toolNames)
         .text_color(g.missing.length ? t.blocked : t.dim)
         .child(`${have}/${this.scan.tools.length} tools`))
+      .when(!g.hub && Boolean(this.org), (el) => el.child(div().flex_none().tooltip(`Publish as a private skill in ${this.orgName()}`)
+        .child(this.button(`share-${g.slug}`, this.sharing.has(g.slug) ? "Sharing…" : "Share to org", t, { disabled: this.sharing.has(g.slug) }, (cx) => this.share(g, cx)))))
       .when(Boolean(outdated), (el) => el.child(this.button(`upd-${g.slug}`, busy ? "Updating…" : `Update ${latest}`, t, { primary: true, disabled: busy }, (cx) => this.install(g.slug, cx))));
   }
 
@@ -330,8 +428,9 @@ export default class SkillsHub extends View {
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .child(Input.new(this.input).h_full().text_size(12.5).text_color(t.foreground));
 
-    const tabs = h_flex().flex_none().px(16).pt(4).pb(6).gap(4).items_center().children(TABS.map(([id, label]) => {
-      const on = !this.query && this.tab === id;
+    const tabList = this.org ? [TABS[0], TABS[1], ["org", this.orgName()], TABS[2]] : TABS;
+    const tabs = h_flex().flex_none().px(16).pt(4).pb(6).gap(4).items_center().children(tabList.map(([id, label]) => {
+      const on = (!this.query || id === "org") && this.tab === id;
       const text = id === "installed" && this.installed.length ? `${label} · ${this.installed.length}` : label;
       return div().id(`tab-${id}`).px(10).h(24).flex().items_center().rounded(12).text_size(11.5).cursor_pointer()
         .when(on, (el) => el.bg(t.selected).text_color(t.foreground).font_medium())
@@ -344,6 +443,14 @@ export default class SkillsHub extends View {
         ? `Installs to ${toolLabels}${this.machine ? ` on ${this.machine}` : ""}`
         : "No AI coding tools found"));
 
+    const team = this.tab === "org" ? L.teamPlan(this.manifest, this.installed, this.scan.tools) : [];
+    const teamTotal = this.manifest?.skills?.length ?? 0;
+    const teamRow = h_flex().flex_none().mx(16).mb(6).gap(8).items_center()
+      .child(div().flex_1().text_size(11.5).text_color(t.muted).child(!this.manifest ? "Checking your team's skills…"
+        : team.length ? `${team.length} of ${teamTotal} team ${teamTotal === 1 ? "skill" : "skills"} to install or update`
+        : teamTotal ? `You have all ${teamTotal} team ${teamTotal === 1 ? "skill" : "skills"}` : "Your org has no private skills yet. Share one from Installed."))
+      .child(this.button("teamsync", this.teamSyncing ? "Syncing…" : "Sync team skills", t, { primary: team.length > 0, disabled: this.teamSyncing || !team.length }, (cx) => this.teamSync(cx)));
+
     let body;
     if (showInstalled) {
       body = v_flex().id("installed-list").flex_1().min_h(0).pb(8).overflow_y_scrollbar()
@@ -355,6 +462,7 @@ export default class SkillsHub extends View {
         .children(this.installed.map((g) => this.installedRow(g, t)));
     } else {
       body = v_flex().id("catalog-list").flex_1().min_h(0).pb(8).overflow_y_scrollbar()
+        .when(this.tab === "org", (el) => el.child(teamRow))
         .when(Boolean(this.error), (el) => el.child(div().px(16).text_size(12).text_color(t.blocked).child(this.error)))
         .when(!list && !this.error, (el) => el.child(div().px(16).text_size(12).text_color(t.dim).child("Loading skills…")))
         .when(Boolean(list) && !list.length, (el) => el.child(div().px(16).text_size(12).text_color(t.dim).child("No skills match.")))

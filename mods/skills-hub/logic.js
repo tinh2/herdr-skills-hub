@@ -4,16 +4,16 @@ export const UTM = "utm_source=herdr&utm_medium=mod";
 
 export const TOOLS = [
   { id: "claude-code", label: "Claude Code", dir: ".claude", platform: "CLAUDE_CODE" },
-  { id: "codex", label: "Codex", dir: ".codex", platform: "CODEX" },
+  { id: "codex", label: "Codex", dir: ".codex", platform: "CODEX_CLI" },
   { id: "cursor", label: "Cursor", dir: ".cursor", platform: "CURSOR" },
-  { id: "gemini", label: "Gemini", dir: ".gemini", platform: "GEMINI" },
+  { id: "gemini", label: "Gemini", dir: ".gemini", platform: "GEMINI_CLI" },
   { id: "windsurf", label: "Windsurf", dir: ".windsurf", platform: "WINDSURF" },
   { id: "opencode", label: "OpenCode", dir: ".opencode", platform: "OPENCODE" },
   { id: "cline", label: "Cline", dir: ".cline", platform: "CLINE" },
-  { id: "roo", label: "Roo Code", dir: ".roo", platform: "ROO" },
-  { id: "augment", label: "Augment", dir: ".augment", platform: "AUGMENT" },
+  { id: "roo", label: "Roo Code", dir: ".roo", platform: "ROO_CODE" },
+  { id: "augment", label: "Augment", dir: ".augment", platform: "OTHER" },
   { id: "continue", label: "Continue", dir: ".continue", platform: "CONTINUE" },
-  { id: "junie", label: "Junie", dir: ".junie", platform: "JUNIE" },
+  { id: "junie", label: "Junie", dir: ".junie", platform: "JETBRAINS" },
 ];
 
 export const toolById = (id) => TOOLS.find((t) => t.id === id);
@@ -36,6 +36,60 @@ export function listUrl({ tab, query, limit = 30 }) {
     params.set("sort", tab === "top" ? "highest_rated" : "trending");
   }
   return `${API}/skills?${params}`;
+}
+
+export function orgSkillsUrl(org, query, limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const q = (query || "").trim();
+  if (q) params.set("q", q);
+  return `${API}/orgs/${encodeURIComponent(org)}/skills?${params}`;
+}
+
+export function manifestUrl(org) {
+  return `${API}/orgs/${encodeURIComponent(org)}/registry/manifest`;
+}
+
+export function teamPlan(manifest, installed, tools) {
+  return (manifest?.skills ?? [])
+    .filter((m) => isValidSlug(m.slug))
+    .map((m) => ({ slug: m.slug, name: m.name, version: m.version, state: skillState(m.slug, m.version, installed) }))
+    .filter((m) => tools.length && m.state !== "installed");
+}
+
+export const CATEGORIES = ["build", "test", "qa", "review", "deploy", "docs", "security", "ux", "analysis", "productivity", "integration", "ops", "combo", "meta", "marketing", "product", "creative", "data", "business", "healthcare", "accessibility", "gamedev", "research", "education"];
+
+export function parseSkillMarkdown(text, slug) {
+  const src = String(text || "");
+  const meta = {};
+  let body = src;
+  const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (m) {
+    body = src.slice(m[0].length);
+    for (const line of m[1].split(/\r?\n/)) {
+      const kv = line.match(/^([A-Za-z_-]+):\s*(.*)$/);
+      if (kv) meta[kv[1].toLowerCase()] = kv[2].trim().replace(/^["']|["']$/g, "");
+    }
+  }
+  return { name: meta.name || slug, description: meta.description || "", version: meta.version || "", category: meta.category || "", instructions: body.trim() };
+}
+
+export function publishBody(skill, org, tools) {
+  const problems = [];
+  if (skill.description.length < 10) problems.push("its description needs at least 10 characters");
+  if (skill.instructions.length < 50) problems.push("its instructions need at least 50 characters");
+  if (problems.length) throw new Error(`Can't share it yet: ${problems.join(" and ")}.`);
+  const version = /^\d+\.\d+\.\d+$/.test(skill.version) ? skill.version : "1.0.0";
+  const platforms = [...new Set(tools.map((id) => toolById(id)?.platform).filter(Boolean))];
+  return {
+    name: skill.name.slice(0, 100),
+    description: skill.description.slice(0, 1000),
+    categorySlug: CATEGORIES.includes(skill.category) ? skill.category : "productivity",
+    platforms: platforms.length ? platforms : ["CLAUDE_CODE"],
+    instructions: skill.instructions,
+    visibility: "ORG",
+    orgSlug: org,
+    version,
+  };
 }
 
 export function isValidSlug(s) {

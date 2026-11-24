@@ -99,3 +99,35 @@ test("formatting", () => {
   assert.equal(L.oneLine("a\n b", 10), "a b");
   assert.deepEqual(L.openCommand("linux", "u"), ["xdg-open", ["u"]]);
 });
+
+test("org urls", () => {
+  assert.equal(L.orgSkillsUrl("acme", " lint "), `${L.API}/orgs/acme/skills?limit=50&q=lint`);
+  assert.equal(L.manifestUrl("a b"), `${L.API}/orgs/a%20b/registry/manifest`);
+});
+
+test("team plan lists missing and outdated org skills", () => {
+  const installed = [
+    { slug: "have", tools: { "claude-code": "1.0.0" }, missing: [] },
+    { slug: "old", tools: { "claude-code": "1.0.0" }, missing: [] },
+  ];
+  const manifest = { skills: [
+    { slug: "have", name: "Have", version: "1.0.0" },
+    { slug: "old", name: "Old", version: "1.1.0" },
+    { slug: "new", name: "New", version: "0.1.0" },
+    { slug: "../bad", name: "Bad", version: "1.0.0" },
+  ] };
+  assert.deepEqual(L.teamPlan(manifest, installed, ["claude-code"]).map((m) => [m.slug, m.state]), [["old", "update"], ["new", "install"]]);
+  assert.deepEqual(L.teamPlan(manifest, installed, []), []);
+  assert.deepEqual(L.teamPlan(null, installed, ["codex"]), []);
+});
+
+test("a local skill becomes an org publish body", () => {
+  const md = "---\nname: \"Deploy check\"\ndescription: Checks a deploy before it ships\ncategory: deploy\n---\n\n" + "Run the checks. ".repeat(5);
+  const skill = L.parseSkillMarkdown(md, "deploy-check");
+  assert.equal(skill.name, "Deploy check");
+  const body = L.publishBody(skill, "acme", ["claude-code", "codex", "junie"]);
+  assert.deepEqual([body.visibility, body.orgSlug, body.categorySlug, body.version], ["ORG", "acme", "deploy", "1.0.0"]);
+  assert.deepEqual(body.platforms, ["CLAUDE_CODE", "CODEX_CLI", "JETBRAINS"]);
+  assert.equal(L.publishBody(L.parseSkillMarkdown("---\ndescription: long enough here\n---\n" + "x".repeat(60), "s"), "o", []).categorySlug, "productivity");
+  assert.throws(() => L.publishBody(L.parseSkillMarkdown("short", "s"), "o", []), /description/);
+});
