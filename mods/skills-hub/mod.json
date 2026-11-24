@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "skills-hub",
+  "overlay": { "kind": "dialog", "width": 560, "height": 640 },
+  "palette": [
+    { "title": "skills-hub: browse and install skills", "command": "mod.open", "args": { "name": "skills-hub" }, "words": "skills skillshare claude codex cursor install sync catalog" },
+    { "title": "skills-hub in a tab", "command": "tab.new", "args": { "mod": "skills-hub", "name": "skills" }, "words": "skills skillshare catalog" }
+  ]
+}
