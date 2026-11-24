@@ -167,8 +167,23 @@ export default class SkillsHub extends View {
       } else {
         this.signing = true;
         this.open(L.siteUrl("/settings"));
+        this.watchSignIn(cx);
       }
       cx.notify();
+    });
+  }
+
+  watchSignIn(cx) {
+    cx.timer.after(3000, (cx) => {
+      if (!this.signing) return;
+      cx.spawn(async (cx) => {
+        await this.refreshUser();
+        if (this.user) {
+          this.signing = false;
+          this.loadManifest(cx);
+          cx.notify();
+        } else this.watchSignIn(cx);
+      });
     });
   }
 
@@ -418,7 +433,7 @@ export default class SkillsHub extends View {
       .when(!this.user, (el) => el.child(this.button("signin", this.signing ? "Cancel" : "Sign in", t, {}, (cx) => { if (this.signing) { this.signing = false; cx.notify(); } else this.signIn(cx); })));
 
     const keyRow = v_flex().flex_none().mx(16).my(4).gap(4)
-      .child(div().text_size(11).text_color(t.muted).child("In Settings on skills-hub.ai, create an API key and paste it here."))
+      .child(div().text_size(11).text_color(t.muted).child("In Settings on skills-hub.ai, create an API key, paste it here and press Enter."))
       .child(div().id("key").h(30).px(10).flex().items_center().rounded(8).border_1().border_color(t.accent).cursor_text()
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .child(Input.new(this.keyInput).h_full().text_size(12.5).text_color(t.foreground)));
