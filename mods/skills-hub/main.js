@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { exec, theme, notify, checking, spaces, focused, window as appWindow } from "herdr";
+import { exec, theme, notify, checking, spaces, focused, home, readTextFile, window as appWindow } from "herdr";
 import * as L from "./logic.js";
 
 const TABS = [["trending", "Trending"], ["top", "Top rated"], ["installed", "Installed"]];
@@ -24,9 +24,65 @@ export default class SkillsHub extends View {
     this.input.on("submit", (_e, cx) => this.search(cx));
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
+    this.total = null;
+    this.user = null;
+    this.signing = false;
     if (checking()) return;
     this.rescan(cx);
     this.load(cx);
+    this.loadTotal(cx);
+    this.loadUser(cx);
+  }
+
+  loadTotal(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const r = await fetch(`${L.API}/skills/count`);
+        if (r.ok) this.total = (await r.json()).count ?? null;
+      } catch {}
+      cx.notify();
+    });
+  }
+
+  async token() {
+    try {
+      const c = JSON.parse((await readTextFile(`${home()}/.skills-hub/config.json`)) ?? "{}");
+      return c.accessToken || c.apiKey || null;
+    } catch { return null; }
+  }
+
+  loadUser(cx) {
+    cx.spawn(async (cx) => {
+      const tok = await this.token();
+      let user = null;
+      if (tok) {
+        try {
+          const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `Bearer ${tok}` } });
+          if (r.ok) user = await r.json();
+        } catch {}
+      }
+      this.user = user;
+      cx.notify();
+    });
+  }
+
+  signIn(cx) {
+    if (this.signing) return;
+    this.signing = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = await exec("npx", ["-y", "@skills-hub-ai/cli", "login"], { timeout: 300_000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
+      this.signing = false;
+      if (r.code !== 0) notify({ title: "skills-hub", body: (r.stderr || r.stdout || "Sign in didn't finish.").trim().split("\n").pop(), level: "error", timeout: 6000 });
+      this.loadUser(cx);
+    });
+  }
+
+  signOut(cx) {
+    cx.spawn(async (cx) => {
+      await exec("npx", ["-y", "@skills-hub-ai/cli", "logout"], { timeout: 60_000 }).catch(() => null);
+      this.loadUser(cx);
+    });
   }
 
   currentMachine() {
@@ -238,7 +294,10 @@ export default class SkillsHub extends View {
         .hover((s) => s.text_color(t.accent)).tooltip("Open skills-hub.ai")
         .on_click(() => this.open(L.siteUrl())).child("skills-hub.ai"))
       .child(div().flex_1().truncate().text_size(11).text_color(t.dim).child("the skillshare for Herdr"))
-      .child(this.button("signin", "Sign in ↗", t, {}, () => this.open(L.siteUrl("/auth/login"))));
+      .when(Boolean(this.user), (el) => el.child(div().id("me").text_size(11.5).text_color(t.muted).cursor_pointer()
+        .hover((s) => s.text_color(t.foreground)).tooltip("Signed in. Click to sign out.")
+        .on_click((_e, cx) => this.signOut(cx)).child(`@${this.user.username}`)))
+      .when(!this.user, (el) => el.child(this.button("signin", this.signing ? "Finish in browser…" : "Sign in", t, { disabled: this.signing }, (cx) => this.signIn(cx))));
 
     const search = div().id("search").flex_none().mx(16).my(4).h(30).px(10).flex().items_center().rounded(8)
       .border_1().border_color(this.typing ? t.accent : t.border).cursor_text()
@@ -278,7 +337,7 @@ export default class SkillsHub extends View {
 
     const footer = h_flex().id("footer").flex_none().px(16).h(30).items_center().border_t_1().border_color(t.border)
       .text_size(11).text_color(t.dim)
-      .child(div().flex_1().child(this.loading ? "Loading…" : "4,400+ skills on skills-hub.ai"))
+      .child(div().flex_1().child(this.loading ? "Loading…" : this.total ? `${this.total.toLocaleString("en-US")} skills on skills-hub.ai` : "skills-hub.ai"))
       .child(div().id("publish").cursor_pointer().hover((s) => s.text_color(t.foreground))
         .on_click(() => this.open(L.siteUrl("/publish"))).child("Publish a skill ↗"));
 

@@ -8,19 +8,19 @@ A panel for finding and installing AI coding skills from skills-hub.ai. Search t
 
 A dialog 560×640 px (or a tab), on the theme's `surface`, ui font, top to bottom:
 
-1. **Header**, 12px top padding: "skills-hub.ai" in 14px bold `foreground` (click opens the site), "the skillshare for Herdr" in 11px `dim`, and a bordered "Sign in ↗" button on the right.
+1. **Header**, 12px top padding: "skills-hub.ai" in 14px bold `foreground` (click opens the site), "the skillshare for Herdr" in 11px `dim`, and on the right a bordered "Sign in" button, or "@username" once signed in (click signs out).
 2. **Search field**, 30px tall, 8px corners, 1px `border` (`accent` while typing), placeholder "Search skills-hub.ai".
 3. **Tabs** as 24px pills: Trending, Top rated, Installed · N. The selected one has `selected` background. While a search is active no pill is selected and "Results for “query”" shows beside them.
 4. **Status line**, 10.5px `dim`: "Installs to Claude Code, Codex, … on <machine>" (machine only when the focused space is remote), or "No AI coding tools found".
 5. **List** that scrolls:
    - Catalog cards: name 13px semibold, description 11.5px `muted` (one line of up to 140 chars, wrapped), then "★ 4.5 (3)" or "no ratings", "1.2k installs", "@author" in 10.5px `dim`. A 24px button on the right: **Install** (`solid`), **Update** (`solid`), **Install** bordered when only some tools have it, **Installed** bordered and dim, **Installing…** while busy.
    - Installed rows: slug 12.5px medium with `vX` in `dim`, description one line, "k/n tools" (`blocked` color when some tool lacks it, hover lists the tools) and an **Update x.y.z** button when skills-hub.ai has a newer version. Above them: "N copies missing or older across tools" and a **Sync to all tools** button.
-6. **Footer**, 30px, top border: "4,400+ skills on skills-hub.ai" (or "Loading…") and "Publish a skill ↗".
+6. **Footer**, 30px, top border: the live total from `GET /skills/count` ("16,137 skills on skills-hub.ai", or "Loading…") and "Publish a skill ↗".
 
 ## How it behaves
 
 - Opens on Trending. Typing searches after 350 ms of quiet (Enter searches at once). Clicking a tab clears the search.
-- Clicking a card title opens `https://skills-hub.ai/skills/<slug>?utm_source=herdr&utm_medium=mod` in the system browser. Sign in opens `/auth/login`, Publish opens `/publish`, both with the same UTM.
+- Clicking a card title opens `https://skills-hub.ai/skills/<slug>?utm_source=herdr&utm_medium=mod` in the system browser. Publish opens `/publish` with the same UTM. Sign in runs `npx -y @skills-hub-ai/cli login` (browser OAuth), then reads the token from `~/.skills-hub/config.json` and shows the user from `GET /users/me`.
 - Install fetches the skill, writes `SKILL.md` into `~/<tool>/skills/<slug>/` for every detected tool, posts one install count to skills-hub.ai, shows a toast naming the tools and rescans.
 - Sync copies each skill's newest copy (highest `version:` in frontmatter, ties go to Claude Code first) into each tool that lacks it or has an older version. It never deletes. A toast says how many copies were made.
 - A tool is detected when its config folder exists in the home folder: `.claude`, `.codex`, `.cursor`, `.gemini`, `.windsurf`, `.opencode`, `.cline`, `.roo`, `.augment`, `.continue`, `.junie`.
@@ -43,7 +43,7 @@ A dialog 560×640 px (or a tab), on the theme's `surface`, ui font, top to botto
 - `herdr-app check` runs `init()`; return early on `checking()` so a check never scans or fetches.
 - The Installed tab asks for each skills-hub skill's detail to learn its latest version (six at a time); the API has no batch lookup.
 - Top rated is the API's `highest_rated`, which puts a single 5-star review first.
-- Sign in is a link only; ratings and publishing happen on the site.
+- Sign in shares the skills-hub CLI login (`~/.skills-hub/config.json`); ratings and publishing still happen on the site.
 - Skills in a project folder (`.github/copilot`, `.kiro`) are out of scope; only home-folder tools count.
 
 ## Done when

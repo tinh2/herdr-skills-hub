@@ -8,7 +8,7 @@ The skillshare for [Herdr](https://herdr.dev): browse, install and sync AI codin
 
 ## What it does
 
-- Search 4,400+ skills on skills-hub.ai, or browse **Trending** and **Top rated**. No account needed.
+- Search 16,000+ skills on skills-hub.ai, or browse **Trending** and **Top rated**. No account needed.
 - Each card shows the name, a one-line description, rating and installs. Click the title to open the skill on skills-hub.ai.
 - **Install** writes the skill for every AI tool on the machine: Claude Code, Codex, Cursor, Gemini, Windsurf, OpenCode, Cline, Roo, Augment, Continue and Junie (whichever have a config folder). Cards show Installed, Update or Install.
 - **Installed** lists every skill on the machine with how many tools have it. **Sync to all tools** copies the newest version of each skill into every tool that lacks it or has an older one.
