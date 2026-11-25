@@ -199,8 +199,9 @@ export default class SkillsHub extends View {
         if (r.ok) {
           const path = `${home()}/.skills-hub/config.json`;
           let c = {};
-          try { c = JSON.parse((await readTextFile(path)) ?? "{}"); } catch {}
-          await writeTextFile(path, JSON.stringify({ apiUrl: c.apiUrl || "https://api.skills-hub.ai", ...c, apiKey: key, accessToken: undefined }, null, 2) + "\n");
+          let prev = null;
+          try { prev = await readTextFile(path); c = JSON.parse(prev ?? "{}"); } catch {}
+          await writeTextFile(path, JSON.stringify({ apiUrl: c.apiUrl || "https://api.skills-hub.ai", ...c, apiKey: key, accessToken: undefined }, null, 2) + "\n", prev ?? undefined);
         } else error = r.status === 401 ? "That key isn't valid. Create a new one on skills-hub.ai." : `skills-hub returned ${r.status}.`;
       } catch (e) {
         error = `Couldn't save the key: ${e?.message ?? e}`;
