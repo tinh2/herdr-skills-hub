@@ -55,7 +55,7 @@ export default class SkillsHub extends View {
   async token() {
     try {
       const c = JSON.parse((await readTextFile(`${home()}/.skills-hub/config.json`)) ?? "{}");
-      return c.accessToken || c.apiKey || null;
+      return c.accessToken ? `Bearer ${c.accessToken}` : c.apiKey ? `ApiKey ${c.apiKey}` : null;
     } catch { return null; }
   }
 
@@ -64,7 +64,7 @@ export default class SkillsHub extends View {
     let user = null;
     if (tok) {
       try {
-        const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `Bearer ${tok}` } });
+        const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: tok } });
         if (r.ok) user = await r.json();
       } catch {}
     }
@@ -72,7 +72,7 @@ export default class SkillsHub extends View {
     this.orgs = [];
     if (user && tok) {
       try {
-        const r = await fetch(`${L.API}/orgs`, { headers: { Authorization: `Bearer ${tok}` } });
+        const r = await fetch(`${L.API}/orgs`, { headers: { Authorization: tok } });
         if (r.ok) this.orgs = (await r.json()).map((m) => m.org).filter((o) => o?.slug);
       } catch {}
     }
@@ -82,7 +82,7 @@ export default class SkillsHub extends View {
 
   async headers(json) {
     const tok = await this.token();
-    return { ...(tok ? { Authorization: `Bearer ${tok}` } : {}), ...(json ? { "content-type": "application/json" } : {}) };
+    return { ...(tok ? { Authorization: tok } : {}), ...(json ? { "content-type": "application/json" } : {}) };
   }
 
   orgName() {
@@ -195,7 +195,7 @@ export default class SkillsHub extends View {
     cx.spawn(async (cx) => {
       let error = null;
       try {
-        const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `Bearer ${key}` } });
+        const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `ApiKey ${key}` } });
         if (r.ok) {
           const path = `${home()}/.skills-hub/config.json`;
           let c = {};
