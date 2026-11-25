@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { exec, theme, notify, checking, spaces, focused, home, readTextFile, window as appWindow } from "herdr";
+import { exec, theme, notify, checking, spaces, focused, home, readTextFile, writeTextFile, window as appWindow } from "herdr";
 import * as L from "./logic.js";
 
 const TABS = [["trending", "Trending"], ["top", "Top rated"], ["installed", "Installed"]];
@@ -189,12 +189,28 @@ export default class SkillsHub extends View {
 
   saveKey(cx) {
     const key = this.keyInput.value().trim();
-    if (!key) return;
-    this.keyInput.set_value("");
+    if (!key || this.savingKey) return;
+    this.savingKey = true;
+    cx.notify();
     cx.spawn(async (cx) => {
-      const r = await exec("npx", ["-y", "@skills-hub-ai/cli", "login", "--api-key", key], { timeout: 120_000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
-      if (r.code !== 0) notify({ title: "skills-hub", body: (r.stderr || r.stdout || "Couldn't save the key.").trim().split("\n").pop(), level: "error", timeout: 6000 });
-      this.signing = false;
+      let error = null;
+      try {
+        const r = await fetch(`${L.API}/users/me`, { headers: { Authorization: `Bearer ${key}` } });
+        if (r.ok) {
+          const path = `${home()}/.skills-hub/config.json`;
+          let c = {};
+          try { c = JSON.parse((await readTextFile(path)) ?? "{}"); } catch {}
+          await writeTextFile(path, JSON.stringify({ apiUrl: c.apiUrl || "https://api.skills-hub.ai", ...c, apiKey: key, accessToken: undefined }, null, 2) + "\n");
+        } else error = r.status === 401 ? "That key isn't valid. Create a new one on skills-hub.ai." : `skills-hub returned ${r.status}.`;
+      } catch (e) {
+        error = `Couldn't save the key: ${e?.message ?? e}`;
+      }
+      this.savingKey = false;
+      if (error) notify({ title: "skills-hub", body: error, level: "error", timeout: 6000 });
+      else {
+        this.keyInput.set_value("");
+        this.signing = false;
+      }
       this.loadUser(cx);
     });
   }
@@ -436,7 +452,8 @@ export default class SkillsHub extends View {
       .child(div().text_size(11).text_color(t.muted).child("In Settings on skills-hub.ai, create an API key, paste it here and press Enter."))
       .child(div().id("key").h(30).px(10).flex().items_center().rounded(8).border_1().border_color(t.accent).cursor_text()
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .child(Input.new(this.keyInput).h_full().text_size(12.5).text_color(t.foreground)));
+        .child(Input.new(this.keyInput).flex_1().h_full().text_size(12.5).text_color(t.foreground))
+        .child(this.button("savekey", this.savingKey ? "Checking…" : "Save", t, {}, (cx) => this.saveKey(cx))));
 
     const search = div().id("search").flex_none().mx(16).my(4).h(30).px(10).flex().items_center().rounded(8)
       .border_1().border_color(this.typing ? t.accent : t.border).cursor_text()
